@@ -1,8 +1,9 @@
 package com.example.stockmarketkotlin.presentation.onboardingScreen.phoneNumberScreen
 
 import android.app.Activity
+import android.content.ContentValues.TAG
 import android.content.Context
-import android.text.TextUtils
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -22,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,31 +34,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import com.google.firebase.FirebaseException
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.PhoneAuthCredential
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
-import java.util.concurrent.TimeUnit
+import com.example.stockmarketkotlin.util.Resource
+import com.example.stockmarketkotlin.viewModels.AuthViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PhoneNumberScreen(context: Context, mainNavController: NavHostController) {
-    val phoneNumber = remember {
-        mutableStateOf("")
-    }
-    val message = remember {
-        mutableStateOf("")
-    }
-    val verificationID = remember {
-        mutableStateOf("")
-    }
-    val mAuth: FirebaseAuth = FirebaseAuth.getInstance();
-    lateinit var callbacks: PhoneAuthProvider.OnVerificationStateChangedCallbacks
+fun PhoneNumberScreen(context: Context, viewModel: AuthViewModel = hiltViewModel(), mainNavController: NavHostController) {
+    val phoneNumber = remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var isCircularLoading by remember { mutableStateOf(false) }
+    var verificationID by remember { mutableStateOf("") }
+
     Box(
-        modifier = Modifier
-            .fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -88,12 +83,31 @@ fun PhoneNumberScreen(context: Context, mainNavController: NavHostController) {
             Spacer(modifier = Modifier.height(25.dp))
             Button(
                 onClick = {
-                    if (TextUtils.isEmpty(phoneNumber.value.toString())){
-                        Toast.makeText(context,"Please enter your phone number..",Toast.LENGTH_SHORT).show()
-                    }
-                    else{
+                    if (phoneNumber.value.isBlank()) {
+                        Toast.makeText(context, "Please enter your phone number..", Toast.LENGTH_SHORT).show()
+                    } else {
                         val number = "+91${phoneNumber.value}"
-                        sendVerificationCode(number, mAuth, context as Activity, callbacks)
+                        scope.launch(Dispatchers.Main) {
+                            viewModel.createUserWithPhone(number, context as Activity).collect { result ->
+                                when (result) {
+                                    is Resource.Success -> {
+                                        isCircularLoading = false
+                                        Toast.makeText(context, "OTP has been generated", Toast.LENGTH_SHORT).show()
+                                        verificationID = result.data.toString()
+                                        Log.d(TAG,"verificationID --------------> $verificationID")
+                                        mainNavController.navigate("otp")
+                                    }
+                                    is Resource.Error -> {
+                                        isCircularLoading = false
+                                        Log.d(TAG, result.error.toString())
+                                        Toast.makeText(context,"Some Error in generating the verification code",Toast.LENGTH_SHORT).show()
+                                    }
+                                    is Resource.Loading -> {
+                                        isCircularLoading = true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             ) {
@@ -101,36 +115,10 @@ fun PhoneNumberScreen(context: Context, mainNavController: NavHostController) {
             }
         }
     }
-    callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-        override fun onVerificationCompleted(p0: PhoneAuthCredential) {
-            message.value = "Verification successful"
-            Toast.makeText(context, "Verification successful..", Toast.LENGTH_SHORT).show()
-        }
-
-        override fun onVerificationFailed(p0: FirebaseException) {
-            message.value = "Fail to verify user : \n" + p0.message
-            Toast.makeText(context, "Verification failed.. ${p0.message}", Toast.LENGTH_SHORT).show()
-        }
-
-        override fun onCodeSent(verificationId: String, p1: PhoneAuthProvider.ForceResendingToken) {
-            super.onCodeSent(verificationId, p1)
-            verificationID.value = verificationId
-            mainNavController.navigate("otp/${verificationId}")
+    if (isCircularLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center){
+            CircularProgressIndicator()
         }
     }
 }
 
-private fun sendVerificationCode(
-    number: String,
-    auth: FirebaseAuth,
-    activity: Activity,
-    callbacks: PhoneAuthProvider.OnVerificationStateChangedCallbacks
-) {
-    val options = PhoneAuthOptions.newBuilder(auth)
-        .setPhoneNumber(number)
-        .setTimeout(60L, TimeUnit.SECONDS)
-        .setActivity(activity)
-        .setCallbacks(callbacks)
-        .build()
-    PhoneAuthProvider.verifyPhoneNumber(options)
-}
