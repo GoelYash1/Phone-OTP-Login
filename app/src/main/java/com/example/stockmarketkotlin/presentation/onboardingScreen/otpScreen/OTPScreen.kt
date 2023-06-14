@@ -1,8 +1,6 @@
 package com.example.stockmarketkotlin.presentation.onboardingScreen.otpScreen
 
-import android.app.Activity
 import android.content.Context
-import android.text.TextUtils
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,14 +13,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,26 +32,21 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.stockmarketkotlin.Home
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
-import com.google.firebase.auth.PhoneAuthCredential
-import com.google.firebase.auth.PhoneAuthProvider
+import com.example.stockmarketkotlin.util.Resource
+import com.example.stockmarketkotlin.viewModels.AuthViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OTPScreen(context: Context, mainNavController: NavHostController, verificationID: String) {
-    val otp = remember {
-        mutableStateOf("")
-    }
-    val mAuth: FirebaseAuth = FirebaseAuth.getInstance();
-    val message = remember {
-        mutableStateOf("")
-    }
-    val navBackStackEntry by mainNavController.currentBackStackEntryAsState()
-    val verificationID = navBackStackEntry?.arguments?.getString("verificationID") ?: ""
+fun OTPScreen(context: Context, mainNavController: NavHostController, viewModel: AuthViewModel = hiltViewModel()) {
+    var otp by remember { mutableStateOf("")}
+    val scope = rememberCoroutineScope()
+    var isCircularLoading by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize(),
@@ -84,29 +79,33 @@ fun OTPScreen(context: Context, mainNavController: NavHostController, verificati
             )
             Spacer(modifier = Modifier.height(5.dp))
             TextField(
-                value = otp.value,
-                onValueChange = {otp.value = it},
+                value = otp,
+                onValueChange = {otp = it},
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 placeholder = { Text(text = "Enter OTP")}
             )
             Spacer(modifier = Modifier.height(25.dp))
             Button(
                 onClick = {
-                    if (TextUtils.isEmpty(otp.value.toString())) {
-                        Toast.makeText(context, "Please enter otp..", Toast.LENGTH_SHORT)
-                            .show()
-                    } else {
-                        val credential: PhoneAuthCredential = PhoneAuthProvider.getCredential(
-                            verificationID, otp.value
-                        )
-                        signInWithPhoneAuthCredential(
-                            credential,
-                            mAuth,
-                            context as Activity,
-                            context,
-                            message,
-                            mainNavController
-                        )
+                    scope.launch(Dispatchers.Main) {
+                        viewModel.signInWithCredential(
+                            otp
+                        ).collect{
+                            when(it){
+                                is Resource.Loading ->{
+                                    isCircularLoading = true
+                                }
+                                is Resource.Error ->{
+                                    isCircularLoading = false
+                                    Toast.makeText(context,"Error->${it.error}",Toast.LENGTH_SHORT).show()
+                                }
+                                is Resource.Success->{
+                                    Toast.makeText(context,"Verification Complete",Toast.LENGTH_SHORT).show()
+                                    isCircularLoading = false
+                                    mainNavController.navigate(Home.route)
+                                }
+                            }
+                        }
                     }
                 }
             ) {
@@ -114,30 +113,10 @@ fun OTPScreen(context: Context, mainNavController: NavHostController, verificati
             }
         }
     }
-}
-
-private fun signInWithPhoneAuthCredential(
-    credential: PhoneAuthCredential,
-    auth: FirebaseAuth,
-    activity: Activity,
-    context: Context,
-    message: MutableState<String>,
-    mainNavController: NavHostController
-) {
-    auth.signInWithCredential(credential)
-        .addOnCompleteListener(activity) { task ->
-            if (task.isSuccessful) {
-                message.value = "Verification successful"
-                Toast.makeText(context, "Verification successful..", Toast.LENGTH_SHORT).show()
-                mainNavController.navigate(Home.route)
-            } else {
-                if (task.exception is FirebaseAuthInvalidCredentialsException) {
-                    Toast.makeText(
-                        context,
-                        "Verification failed.." + (task.exception as FirebaseAuthInvalidCredentialsException).message,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
+    if (isCircularLoading)
+    {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center){
+            CircularProgressIndicator()
         }
+    }
 }
